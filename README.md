@@ -1,7 +1,7 @@
 # NaoAI
 
 Installing Nao python SDK
-1. [https://community.ald.softbankrobotics.com/en/resources/software/language/en-gb/robot/nao-2](Download nao python sdk and c++ sdk). You will need c++ sdk for boostlibs.    
+1. [Download nao python sdk and c++ sdk](https://community.ald.softbankrobotics.com/en/resources/software/language/en-gb/robot/nao-2]). You will need c++ sdk for boostlibs.    
 2. Extract both and move python sdk to your favorite place.   
 3. 
 ```
