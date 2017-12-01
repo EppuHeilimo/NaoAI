@@ -15,3 +15,5 @@ test_images/
 ssd*
 faster*
 *.pyc
+.idea
+face*

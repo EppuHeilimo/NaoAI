@@ -54,13 +54,13 @@ class Model:
     path_to_ckpt = ""
     path_to_labels = ""
     category_index = None
-    detection_graph = None
+    graphs = None
     sess = None
 
     # ssd_mobilenet_v1_coco_11_06_2017
     # faster_rcnn_resnet101_coco_2017_11_08
     # ssd_mobilenet_v1_coco_2017_11_08
-    def __init__(self, num_classes=90, download_from_tf=True, model_name='ssd_mobilenet_v1_coco_11_06_2017'):
+    def __init__(self, num_classes=1, download_from_tf=False, model_name='face_ssd_mobilenet_v1'):
         # What model to download.
         self.model_name = model_name
         self.model_file = self.model_name + '.tar.gz'
@@ -75,18 +75,19 @@ class Model:
         self.path_to_ckpt = self.model_name + '/frozen_inference_graph.pb'
         # List of the strings that is used to add correct label for each box.
         self.path_to_labels = os.path.join('MachineLearning/object_detection/data', 'mscoco_label_map.pbtxt')
+        if download_from_tf:
+            tar_file = tarfile.open(self.model_file)
+            for file in tar_file.getmembers():
+                file_name = os.path.basename(file.name)
+                if 'frozen_inference_graph.pb' in file_name:
+                    tar_file.extract(file, os.getcwd())
 
-        tar_file = tarfile.open(self.model_file)
-        for file in tar_file.getmembers():
-            file_name = os.path.basename(file.name)
-            if 'frozen_inference_graph.pb' in file_name:
-                tar_file.extract(file, os.getcwd())
 
 
     def load_frozen_model(self):
         # ## Load a (frozen) Tensorflow model into memory.
-        self.detection_graph = tf.Graph()
-        with self.detection_graph.as_default():
+        self.graphs = tf.Graph()
+        with self.graphs.as_default():
             od_graph_def = tf.GraphDef()
             with tf.gfile.GFile(self.path_to_ckpt, 'rb') as fid:
                 serialized_graph = fid.read()
@@ -111,21 +112,21 @@ class Model:
             (im_height, im_width, 3)).astype(np.uint8)
 
     def start_session(self):
-        self.detection_graph.as_default()
-        self.sess = tf.Session(graph=self.detection_graph)
+        self.graphs.as_default()
+        self.sess = tf.Session(graph=self.graphs)
         # Definite input and output Tensors for detection_graph
-        self.image_tensor = self.detection_graph.get_tensor_by_name('image_tensor:0')
+        self.image_tensor = self.graphs.get_tensor_by_name('image_tensor:0')
         # Each box represents a part of the image where a particular object was detected.
-        self.detection_boxes = self.detection_graph.get_tensor_by_name('detection_boxes:0')
+        self.detection_boxes = self.graphs.get_tensor_by_name('detection_boxes:0')
         # Each score represent how level of confidence for each of the objects.
         # Score is shown on the result image, together with the class label.
-        self.detection_scores = self.detection_graph.get_tensor_by_name('detection_scores:0')
-        self.detection_classes = self.detection_graph.get_tensor_by_name('detection_classes:0')
-        self.num_detections = self.detection_graph.get_tensor_by_name('num_detections:0')
+        self.detection_scores = self.graphs.get_tensor_by_name('detection_scores:0')
+        self.detection_classes = self.graphs.get_tensor_by_name('detection_classes:0')
+        self.num_detections = self.graphs.get_tensor_by_name('num_detections:0')
 
     def close_session(self):
-        self.detection_graph.as_default()
-        self.sess = tf.Session(graph=self.detection_graph)
+        self.graphs.as_default()
+        self.sess = tf.Session(graph=self.graphs)
 
     def predict(self, image_path="", image_np=None):
         if not image_path == "":
