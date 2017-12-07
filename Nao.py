@@ -12,6 +12,11 @@ import os
 import sys
 import traceback
 import pickle
+import wave
+import pyaudio
+from scipy.io import wavfile
+import matplotlib.pyplot as plt
+
 
 WordRec = None
 AudioRemote = None
@@ -21,11 +26,15 @@ class AudioRemoteModule(ALModule):
     """ Mandatory doc """
     nao = None
     name = ""
-
+    py_audio = None
+    stream = None
+    data = np.empty([1])
+    filter_size = 500
     def __init__(self, name, nao_ref):
         ALModule.__init__(self, name)
         self.name = name
         self.nao = nao_ref
+        self.py_audio = pyaudio.PyAudio()
         nao.connect_remote_audio()
 
     def start(self):
@@ -36,12 +45,12 @@ class AudioRemoteModule(ALModule):
 
     def processRemote(self, nb_channels, nb_samples, timestamp, buffer):
         """ Mandatory doc """
-        print("Got something through processRemote")
-        self.process(nb_channels, nb_samples, timestamp, buffer)
-
-    def process(self, nb_channels, nb_samples, timestamp, buffer):
-        """ Mandatory doc """
-        print("I'm receiving something: {}".format(buffer))
+        unfiltered_buffer = np.fromstring(str(buffer), dtype=np.int16)
+        if np.amax(unfiltered_buffer) > 5000:
+            # if amplitude is between filter_size and -filter_size, make it 0
+            filtered_buffer = np.array(map(lambda a: 0 if self.filter_size > a < -self.filter_size else a, unfiltered_buffer))
+            self.data = np.append(self.data, filtered_buffer)
+            print len(self.data)
 
 
 class WordRecModule(ALModule):
@@ -82,6 +91,8 @@ class Nao:
     cam_id = ""
     asr_id = ""
     broker = None
+    audio_file = None
+    sample_rate = 16000
 
     def __init__(self, ip_address="192.168.55.145", port=9559):
         self.IP = ip_address
@@ -98,6 +109,8 @@ class Nao:
         self.memory = ALProxy("ALMemory", self.IP, self.PORT)
         self.tts = ALProxy("ALTextToSpeech", self.IP, self.PORT)
         self.cam = ALProxy("ALVideoDevice", self.IP, self.PORT)
+
+    def speech_rec_connect(self):
         self.asr = ALProxy("ALSpeechRecognition", self.IP, self.PORT)
         self.asr.pause(True)
         vocabulary = ["nao", "kissa", "yes"]
@@ -117,11 +130,23 @@ class Nao:
 
     def stop_audio_stream(self, name):
         self.audio.unsubscribe(name)
+        #data = []
+        #[data.append(np.fromstring(AudioRemote.data[x], dtype=np.int16)) for x in range(len(AudioRemote.data))]
+        #np_data = np.array(data)
+        #np_data = np_data.flatten()
+        print(AudioRemote.data)
+        plt.figure(1)
+        plt.title('Signal Wave...')
+        plt.plot(AudioRemote.data)
+        plt.show()
+
+        wavfile.write('test.wav', self.sample_rate, AudioRemote.data)
+        #self.audio_file.close()
 
     def start_audio_stream(self, name):
-        channels = [0, 0, 1, 0]
-        self.audio.setClientPreferences(name, 16000, channels, 0)
+        self.audio.setClientPreferences(name, self.sample_rate, 3, 0)
         self.audio.subscribe(name)
+
 
     def get_image(self):
         #t0 = time.time()
@@ -153,7 +178,7 @@ class Nao:
         t0 = time.time()
         frame = self.cam.getImageRemote(self.cam_id)
         self.cam.releaseImage(self.cam_id)
-        print "Image retrieve time: ", time.time() - t0
+        #print "Image retrieve time: ", time.time() - t0
         return frame
 
     def set_parameter(self, param_id, value):
@@ -231,10 +256,11 @@ if __name__ == '__main__':
     model = tfapi.Model(model_name='face_ssd_mobilenet_v1')
     try:
         nao.connect()
+        #nao.speech_rec_connect()
         nao.stop_video()
-        global WordRec
+        #global WordRec
         global AudioRemote
-        WordRec = WordRecModule("WordRec", nao)
+        #WordRec = WordRecModule("WordRec", nao)
         AudioRemote = AudioRemoteModule("AudioRemote", nao)
         model.load_frozen_model()
         model.load_label_map()
@@ -243,16 +269,18 @@ if __name__ == '__main__':
         model.start_session()
         AudioRemote.start()
         while True:
-            image = nao.get_frame()
-            image = Utility.nao_YUV2BGR(image)
-            if image is not None:
-                image = model.predict(image_np=image)
-                Utility.display_image_cv2(image)
-            else:
-                nao.say("Piip poop")
-    except KeyboardInterrupt:
-        pass
-    except:
+            try:
+                image = nao.get_frame()
+                image = Utility.nao_YUV2BGR(image)
+                if image is not None:
+                    image = model.predict(image_np=image)
+                    Utility.display_image_cv2(image)
+                else:
+                    nao.say("Piip poop")
+            except Exception as e:
+                pass
+                #print 'Image processing failed.'
+    except Exception as e:
         traceback.print_exc()
         print ("No connection to Nao, running image data from ./test/ folder.")
         model = tfapi.Model()
@@ -277,12 +305,14 @@ if __name__ == '__main__':
         traceback.print_stack()
         model.close_session()
 
-        try:
-            nao.stop_video()
-            nao.stop_sr()
-            WordRec.stop()
-            AudioRemote.stop()
-            nao.broker.shutdown()
-        except:
-            pass
+        print('Stopping remote audio module.')
+        AudioRemote.stop()
+        print('Stopping video')
+        nao.stop_video()
+        print('Stopping speech recognition')
+        #nao.stop_sr()
+        #WordRec.stop()
+        print('Stopping broker.')
+        nao.broker.shutdown()
+
 

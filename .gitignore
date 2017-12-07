@@ -17,3 +17,5 @@ faster*
 *.pyc
 .idea
 face*
+*.raw
+*.wav
