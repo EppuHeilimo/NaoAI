@@ -1,3 +1,4 @@
+from __future__ import division
 from naoqi import ALProxy
 from naoqi import ALModule
 from naoqi import ALBroker
@@ -15,7 +16,9 @@ import pickle
 import wave
 import pyaudio
 from scipy.io import wavfile
+from scipy import fftpack
 import matplotlib.pyplot as plt
+
 
 
 WordRec = None
@@ -29,7 +32,12 @@ class AudioRemoteModule(ALModule):
     py_audio = None
     stream = None
     data = np.empty([1])
-    filter_size = 500
+    filter_size = 5000
+    temp_data = np.empty([1])
+    filter_buffer_size = 10
+    curr = 0
+
+
     def __init__(self, name, nao_ref):
         ALModule.__init__(self, name)
         self.name = name
@@ -46,11 +54,11 @@ class AudioRemoteModule(ALModule):
     def processRemote(self, nb_channels, nb_samples, timestamp, buffer):
         """ Mandatory doc """
         unfiltered_buffer = np.fromstring(str(buffer), dtype=np.int16)
-        if np.amax(unfiltered_buffer) > 5000:
-            # if amplitude is between filter_size and -filter_size, make it 0
-            filtered_buffer = np.array(map(lambda a: 0 if self.filter_size > a < -self.filter_size else a, unfiltered_buffer))
-            self.data = np.append(self.data, filtered_buffer)
-            print len(self.data)
+        unfiltered_buffer = np.reshape(unfiltered_buffer, (nb_channels, nb_samples), 'F')
+        self.data = np.append(self.data, unfiltered_buffer)
+        print len(self.data)
+
+
 
 
 class WordRecModule(ALModule):
@@ -92,7 +100,7 @@ class Nao:
     asr_id = ""
     broker = None
     audio_file = None
-    sample_rate = 16000
+    sample_rate = 48000
 
     def __init__(self, ip_address="192.168.55.145", port=9559):
         self.IP = ip_address
@@ -134,14 +142,24 @@ class Nao:
         #[data.append(np.fromstring(AudioRemote.data[x], dtype=np.int16)) for x in range(len(AudioRemote.data))]
         #np_data = np.array(data)
         #np_data = np_data.flatten()
-        print(AudioRemote.data)
+        filter_size = 1000
+        data = np.array(map(lambda x: 0 if filter_size > x > -filter_size
+                            else self.asd(x, filter_size), AudioRemote.data))
+
         plt.figure(1)
         plt.title('Signal Wave...')
-        plt.plot(AudioRemote.data)
+        plt.plot(data)
         plt.show()
 
-        wavfile.write('test.wav', self.sample_rate, AudioRemote.data)
+        wavfile.write('test.wav', self.sample_rate, data)
         #self.audio_file.close()
+
+    def asd(self, x, filter_size):
+        if x > 0:
+            x = x - filter_size
+        else:
+            x = x + filter_size
+        return x
 
     def start_audio_stream(self, name):
         self.audio.setClientPreferences(name, self.sample_rate, 3, 0)
@@ -186,6 +204,30 @@ class Nao:
 
 
 class Utility:
+
+    @staticmethod
+    def spectrum(sig, t):
+        """
+        Represent given signal in frequency domain.
+        :param sig: signal.
+        :param t: time scale.
+        :return:
+        """
+        f = fftpack.rfftfreq(sig.size, d=t[1] - t[0])
+        y = fftpack.rfft(sig)
+        return f, np.abs(y)
+
+    @staticmethod
+    def bandpass(f, sig, min_freq, max_freq):
+        """
+        Bandpass signal in a specified by min_freq and max_freq frequency range.
+        :param f: frequency.
+        :param sig: signal.
+        :param min_freq: minimum frequency.
+        :param max_freq: maximum frequency.
+        :return:
+        """
+        return np.where(np.logical_or(f < min_freq, f > max_freq), sig, 0)
 
     @staticmethod
     def display_image_pillow(img):
