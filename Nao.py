@@ -18,6 +18,7 @@ import pyaudio
 from scipy.io import wavfile
 from scipy import fftpack
 import matplotlib.pyplot as plt
+import struct, math
 
 
 
@@ -32,11 +33,8 @@ class AudioRemoteModule(ALModule):
     py_audio = None
     stream = None
     data = np.empty([1])
-    filter_size = 5000
-    temp_data = np.empty([1])
-    filter_buffer_size = 10
-    curr = 0
-
+    nb_channels = 1
+    nb_samples = 2
 
     def __init__(self, name, nao_ref):
         ALModule.__init__(self, name)
@@ -53,10 +51,12 @@ class AudioRemoteModule(ALModule):
 
     def processRemote(self, nb_channels, nb_samples, timestamp, buffer):
         """ Mandatory doc """
-        unfiltered_buffer = np.fromstring(str(buffer), dtype=np.int16)
+        unfiltered_buffer = np.fromstring(buffer, dtype=np.int16)
         unfiltered_buffer = np.reshape(unfiltered_buffer, (nb_channels, nb_samples), 'F')
         self.data = np.append(self.data, unfiltered_buffer)
-        print len(self.data)
+        self.nb_samples = nb_samples
+        self.nb_channels = nb_channels
+
 
 
 
@@ -75,7 +75,7 @@ class WordRecModule(ALModule):
     def onWordRecognized(self, *_args):
         """ Mandatory doc """
         nao.asr.pause(True)
-        print nao.memory.getData("WordRecognized")
+        data = nao.memory.getData("WordRecognized")
         nao.asr.pause(False)
 
     def stop(self):
@@ -121,7 +121,7 @@ class Nao:
     def speech_rec_connect(self):
         self.asr = ALProxy("ALSpeechRecognition", self.IP, self.PORT)
         self.asr.pause(True)
-        vocabulary = ["nao", "kissa", "yes"]
+        vocabulary = ["nao", "who am i", "yes"]
         self.asr.setVocabulary(vocabulary, False)
         self.asr.pause(False)
 
@@ -142,27 +142,33 @@ class Nao:
         #[data.append(np.fromstring(AudioRemote.data[x], dtype=np.int16)) for x in range(len(AudioRemote.data))]
         #np_data = np.array(data)
         #np_data = np_data.flatten()
-        filter_size = 1000
+        filter_size = 3000
         data = np.array(map(lambda x: 0 if filter_size > x > -filter_size
-                            else self.asd(x, filter_size), AudioRemote.data))
+                            else Utility.reduce(x, filter_size), AudioRemote.data))
 
         plt.figure(1)
         plt.title('Signal Wave...')
         plt.plot(data)
         plt.show()
+        wavef = wave.open('test.wav', 'w')
+        wavef.setnchannels(AudioRemote.nb_channels)  # mono
+        print AudioRemote.nb_samples
+        wavef.setsampwidth(1)
+        wavef.setframerate(self.sample_rate)
+        for i in range(int(len(data))):
+            temp_data = struct.pack('<h', data[i])
+            wavef.writeframesraw(temp_data)
 
-        wavfile.write('test.wav', self.sample_rate, data)
+        wavef.writeframes('')
+        wavef.close()
+
+        #wavfile.write('test.wav', self.sample_rate, data)
         #self.audio_file.close()
 
-    def asd(self, x, filter_size):
-        if x > 0:
-            x = x - filter_size
-        else:
-            x = x + filter_size
-        return x
+
 
     def start_audio_stream(self, name):
-        self.audio.setClientPreferences(name, self.sample_rate, 3, 0)
+        self.audio.setClientPreferences(name, self.sample_rate, 1, 0)
         self.audio.subscribe(name)
 
 
@@ -206,28 +212,12 @@ class Nao:
 class Utility:
 
     @staticmethod
-    def spectrum(sig, t):
-        """
-        Represent given signal in frequency domain.
-        :param sig: signal.
-        :param t: time scale.
-        :return:
-        """
-        f = fftpack.rfftfreq(sig.size, d=t[1] - t[0])
-        y = fftpack.rfft(sig)
-        return f, np.abs(y)
-
-    @staticmethod
-    def bandpass(f, sig, min_freq, max_freq):
-        """
-        Bandpass signal in a specified by min_freq and max_freq frequency range.
-        :param f: frequency.
-        :param sig: signal.
-        :param min_freq: minimum frequency.
-        :param max_freq: maximum frequency.
-        :return:
-        """
-        return np.where(np.logical_or(f < min_freq, f > max_freq), sig, 0)
+    def reduce(x, filter_size):
+        if x > 0:
+            x = x - filter_size
+        else:
+            x = x + filter_size
+        return x
 
     @staticmethod
     def display_image_pillow(img):
@@ -298,18 +288,18 @@ if __name__ == '__main__':
     model = tfapi.Model(model_name='face_ssd_mobilenet_v1')
     try:
         nao.connect()
-        #nao.speech_rec_connect()
+        nao.speech_rec_connect()
         nao.stop_video()
-        #global WordRec
-        global AudioRemote
-        #WordRec = WordRecModule("WordRec", nao)
-        AudioRemote = AudioRemoteModule("AudioRemote", nao)
+        global WordRec
+        #global AudioRemote
+        WordRec = WordRecModule("WordRec", nao)
+        #AudioRemote = AudioRemoteModule("AudioRemote", nao)
         model.load_frozen_model()
         model.load_label_map()
         nao.change_camera_parameters(vision_definitions.kQVGA, 9, 1)
         nao.start_video()
         model.start_session()
-        AudioRemote.start()
+        #AudioRemote.start()
         while True:
             try:
                 image = nao.get_frame()
@@ -348,12 +338,12 @@ if __name__ == '__main__':
         model.close_session()
 
         print('Stopping remote audio module.')
-        AudioRemote.stop()
+        #AudioRemote.stop()
         print('Stopping video')
         nao.stop_video()
         print('Stopping speech recognition')
         #nao.stop_sr()
-        #WordRec.stop()
+        WordRec.stop()
         print('Stopping broker.')
         nao.broker.shutdown()
 
