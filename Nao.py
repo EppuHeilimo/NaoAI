@@ -302,7 +302,6 @@ if __name__ == '__main__':
         model.start_session()
         #AudioRemote.start()
         while True:
-            try:
                 image = nao.get_frame()
                 image = Utility.nao_YUV2BGR(image)
                 if image is not None:
@@ -310,9 +309,7 @@ if __name__ == '__main__':
                     Utility.display_image_cv2(image)
                 else:
                     nao.say("Piip poop")
-            except Exception as e:
-                pass
-                #print 'Image processing failed.'
+
     except Exception as e:
         traceback.print_exc()
         print ("No connection to Nao, running image data from ./test/ folder.")
