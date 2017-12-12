@@ -65,6 +65,7 @@ class WordRecModule(ALModule):
     """ Mandatory doc """
     nao = None
     name = ""
+    asked = False
 
     def __init__(self, name, nao_ref):
         ALModule.__init__(self, name)
@@ -76,7 +77,8 @@ class WordRecModule(ALModule):
         """ Mandatory doc """
         nao.asr.pause(True)
         data = nao.memory.getData("WordRecognized")
-        print data
+        if data[0] == 'who am i':
+            self.asked = True
         nao.asr.pause(False)
 
     def stop(self):
@@ -101,11 +103,13 @@ class Nao:
     asr_id = ""
     broker = None
     audio_file = None
+    face_rec = True
     sample_rate = 48000
 
-    def __init__(self, ip_address="192.168.55.145", port=9559):
+    def __init__(self, ip_address="192.168.55.145", port=9559, face_rec=True):
         self.IP = ip_address
         self.PORT = port
+        self.face_rec = face_rec
         # self.cam.setParam(vision_definitions.kCameraSelectID, vision_definitions.kTopCamera)
         # self.cam.setActiveCamera("ALVideoDevice", 1)
 
@@ -281,7 +285,7 @@ class Utility:
 
 
 if __name__ == '__main__':
-    nao = Nao(ip_address="192.168.55.149")
+    nao = Nao(ip_address="192.168.55.149", face_rec=False)
 
     # ssd_mobilenet_v1_coco_11_06_2017
     # faster_rcnn_resnet101_coco_2017_11_08
@@ -291,21 +295,31 @@ if __name__ == '__main__':
         nao.connect()
         nao.speech_rec_connect()
         nao.stop_video()
-        global WordRec
-        #global AudioRemote
-        WordRec = WordRecModule("WordRec", nao)
+        if nao.face_rec:
+            global WordRec
+            WordRec = WordRecModule("WordRec", nao)
+        # global AudioRemote
         #AudioRemote = AudioRemoteModule("AudioRemote", nao)
         model.load_frozen_model()
         model.load_label_map()
-        nao.change_camera_parameters(vision_definitions.kVGA, 9, 1)
+        nao.change_camera_parameters(vision_definitions.k720p, 9, 1)
         nao.start_video()
-        model.start_session()
+        model.start_session(nao.face_rec)
         #AudioRemote.start()
         while True:
                 image = nao.get_frame()
                 image = Utility.nao_YUV2BGR(image)
                 if image is not None:
-                    image = model.predict(image_np=image)
+                    image, labels = model.predict(face_rec=nao.face_rec, image_np=image)
+                    if nao.face_rec:
+                        if WordRec.asked:
+                            names = ''
+                            for i in range(len(labels)):
+                                if len(labels) > 1 and i == len(labels) - 1:
+                                    names += ' and '
+                                names += labels[i]
+                            nao.say("I see " + names)
+                            WordRec.asked = False
                     Utility.display_image_cv2(image)
                 else:
                     nao.say("Piip poop")

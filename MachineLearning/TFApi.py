@@ -26,9 +26,6 @@ import cv2
 from face_classification import model_fn as face_id_model_fn, pad_image
 
 
-if tf.__version__ != '1.4.0':
-  raise ImportError('Please upgrade your tensorflow installation to v1.4.0!')
-
 
 # This is needed since the notebook is stored in the object_detection folder.
 # sys.path.append("..")
@@ -74,7 +71,6 @@ def get_crops(image, boxes, scores, classes, num, inf_threshold):
   return crops, coords
 
 
-
 def get_labels(predictions, labels_dict, threshold):
   labels = []
   for p in predictions:
@@ -84,8 +80,6 @@ def get_labels(predictions, labels_dict, threshold):
     else:
       labels.append('unknown')
   return labels
-
-
 
 
 class Model:
@@ -166,7 +160,7 @@ class Model:
         return np.array(image.getdata()).reshape(
             (im_height, im_width, 3)).astype(np.uint8)
 
-    def start_session(self):
+    def start_session(self, face_rec=True):
         self.graphs.as_default()
         self.sess = tf.Session(graph=self.graphs)
         # Definite input and output Tensors for detection_graph
@@ -178,13 +172,13 @@ class Model:
         self.detection_scores = self.graphs.get_tensor_by_name('detection_scores:0')
         self.detection_classes = self.graphs.get_tensor_by_name('detection_classes:0')
         self.num_detections = self.graphs.get_tensor_by_name('num_detections:0')
-        if self.id_faces:
+        if face_rec:
             self.name_dict = {0: 'janne', 1: 'toni', 2: 'onni'}
             params = {
                 'num_classes': len(self.name_dict),
             }
             run_config = tf.estimator.RunConfig().replace(
-                model_dir='/media/eppu/models/face-id_2017_12_12-2',
+                model_dir='/home/eppu/PycharmProjects/face-id_2017_12_12-2',
             )
             self.face_id_estimator = tf.estimator.Estimator(
                 model_fn=face_id_model_fn, config=run_config, params=params)
@@ -193,7 +187,7 @@ class Model:
         self.graphs.as_default()
         self.sess = tf.Session(graph=self.graphs)
 
-    def predict(self, image_path="", image_np=None):
+    def predict(self, face_rec=True, image_path="", image_np=None):
         if not image_path == "":
             image = Image.open(image_path)
             # the array based representation of the image will be used later in order to prepare the
@@ -206,15 +200,15 @@ class Model:
             [self.detection_boxes, self.detection_scores, self.detection_classes, self.num_detections],
             feed_dict={self.image_tensor: image_np_expanded})
         # Visualization of the results of a detection.
-        crops, coords = get_crops(
-            image_np,
-            np.squeeze(boxes),
-            np.squeeze(scores),
-            np.squeeze(classes).astype(np.int32),
-            0, 0.1)
-        image = image_np
-        labels = []
-        if self.id_faces:
+        if face_rec:
+            crops, coords = get_crops(
+                image_np,
+                np.squeeze(boxes),
+                np.squeeze(scores),
+                np.squeeze(classes).astype(np.int32),
+                0, 0.7)
+            image = image_np
+            labels = []
             crops = np.array([pad_image((224, 224), Image.fromarray(c)) for c in crops])
             if len(crops) > 0:
                 def in_fn():
@@ -228,10 +222,19 @@ class Model:
                     print(p)
                     predictions.append(p['Predictions'])
                 labels = get_labels(predictions, self.name_dict, 0.1)
-        else:
-            labels = ['face' for _ in boxes]
 
-        image = self.draw_boxes(image, coords, labels, self.ttf_font_path, 18)
+            image_np = self.draw_boxes(image_np, coords, labels, self.ttf_font_path, 18)
+        else:
+            vis_util.visualize_boxes_and_labels_on_image_array(
+                image_np,
+                np.squeeze(boxes),
+                np.squeeze(classes).astype(np.int32),
+                np.squeeze(scores),
+                self.category_index,
+                min_score_thresh=0.5,
+                use_normalized_coordinates=True,
+                line_thickness=4)
+        labels = {}
 
         #cv2.imshow('frame', image[:, :, ::-1])
         # Press `q` to close the window
@@ -241,18 +244,7 @@ class Model:
         #fps_string = '\rFPS: {}'.format(round(fps, 1))
         #sys.stdout.write(fps_string)
 
-        '''
-        vis_util.visualize_boxes_and_labels_on_image_array(
-            image_np,
-            np.squeeze(boxes),
-            np.squeeze(classes).astype(np.int32),
-            np.squeeze(scores),
-            self.category_index,
-            min_score_thresh=0.5,
-            use_normalized_coordinates=True,
-            line_thickness=4)
-        '''
-        return image
+        return image_np, labels
 
 
     def show_np_images(self, images_np):

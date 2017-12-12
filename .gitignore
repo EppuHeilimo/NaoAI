@@ -16,6 +16,6 @@ ssd*
 faster*
 *.pyc
 .idea
-face*
+face_ssd*
 *.raw
 *.wav
