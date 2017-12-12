@@ -19,7 +19,12 @@ import zipfile
 from collections import defaultdict
 from io import StringIO
 from matplotlib import pyplot as plt
-from PIL import Image
+from PIL import Image, ImageFont, ImageDraw
+import cv2
+
+
+from face_classification import model_fn as face_id_model_fn, pad_image
+
 
 if tf.__version__ != '1.4.0':
   raise ImportError('Please upgrade your tensorflow installation to v1.4.0!')
@@ -47,6 +52,42 @@ from MachineLearning.object_detection.utils import visualization_utils as vis_ut
 # (https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md)
 #  for a list of other models that can be run out-of-the-box with varying speeds and accuracies.
 
+def _crop(image, box):
+  height, width, _ = image.shape
+  y1 = int(height * box[0])
+  x1 = int(width * box[1])
+  y2 = int(height * box[2])
+  x2 = int(width * box[3])
+
+  crop = image[y1:y2, x1:x2, ]
+  return crop, (y1, x1, y2, x2)
+
+def get_crops(image, boxes, scores, classes, num, inf_threshold):
+  crops = []
+  coords = []
+  for i in range(boxes.shape[0]):
+    if scores[i] > inf_threshold:
+      crop, coord = _crop(image, boxes[i])
+      crops.append(crop)
+      coords.append(coord)
+
+  return crops, coords
+
+
+
+def get_labels(predictions, labels_dict, threshold):
+  labels = []
+  for p in predictions:
+    cls = np.argmax(p)
+    if p[cls] >= threshold:
+      labels.append(labels_dict[cls])
+    else:
+      labels.append('unknown')
+  return labels
+
+
+
+
 class Model:
     model_name = ""
     model_file = ""
@@ -56,6 +97,10 @@ class Model:
     category_index = None
     graphs = None
     sess = None
+    id_faces = True
+    name_dict = {}
+    face_id_estimator = None
+    ttf_font_path = './DejaVuSansMono.ttf'
 
     # ssd_mobilenet_v1_coco_11_06_2017
     # faster_rcnn_resnet101_coco_2017_11_08
@@ -82,7 +127,17 @@ class Model:
                 if 'frozen_inference_graph.pb' in file_name:
                     tar_file.extract(file, os.getcwd())
 
-
+    def draw_boxes(self, image, coordinates, labels, ttf_font_path=None, ttf_font_size=18):
+        font = None
+        if ttf_font_path:
+            font = ImageFont.truetype(self.ttf_font_path, ttf_font_size)
+        image = Image.fromarray(image)
+        draw = ImageDraw.Draw(image)
+        for co, la in zip(coordinates, labels):
+            y1, x1, y2, x2 = co
+            draw.rectangle([x1, y1, x2, y2], outline='darkgreen')
+            draw.text((x1, y1), la, fill='darkgreen', font=font)
+        return np.array(image)
 
     def load_frozen_model(self):
         # ## Load a (frozen) Tensorflow model into memory.
@@ -123,6 +178,16 @@ class Model:
         self.detection_scores = self.graphs.get_tensor_by_name('detection_scores:0')
         self.detection_classes = self.graphs.get_tensor_by_name('detection_classes:0')
         self.num_detections = self.graphs.get_tensor_by_name('num_detections:0')
+        if self.id_faces:
+            self.name_dict = {0: 'janne', 1: 'toni', 2: 'onni'}
+            params = {
+                'num_classes': len(self.name_dict),
+            }
+            run_config = tf.estimator.RunConfig().replace(
+                model_dir='/media/eppu/models/face-id_2017_12_12-2',
+            )
+            self.face_id_estimator = tf.estimator.Estimator(
+                model_fn=face_id_model_fn, config=run_config, params=params)
 
     def close_session(self):
         self.graphs.as_default()
@@ -141,6 +206,42 @@ class Model:
             [self.detection_boxes, self.detection_scores, self.detection_classes, self.num_detections],
             feed_dict={self.image_tensor: image_np_expanded})
         # Visualization of the results of a detection.
+        crops, coords = get_crops(
+            image_np,
+            np.squeeze(boxes),
+            np.squeeze(scores),
+            np.squeeze(classes).astype(np.int32),
+            0, 0.1)
+        image = image_np
+        labels = []
+        if self.id_faces:
+            crops = np.array([pad_image((224, 224), Image.fromarray(c)) for c in crops])
+            if len(crops) > 0:
+                def in_fn():
+                    cr = np.divide(crops, 255.0, dtype=np.float32)
+                    cr = tf.data.Dataset.from_tensor_slices(cr)
+                    cr = cr.batch(10)
+                    return {'image': cr.make_one_shot_iterator().get_next()}
+
+                predictions = []
+                for p in self.face_id_estimator.predict(in_fn, predict_keys=['Predictions']):
+                    print(p)
+                    predictions.append(p['Predictions'])
+                labels = get_labels(predictions, self.name_dict, 0.1)
+        else:
+            labels = ['face' for _ in boxes]
+
+        image = self.draw_boxes(image, coords, labels, self.ttf_font_path, 18)
+
+        #cv2.imshow('frame', image[:, :, ::-1])
+        # Press `q` to close the window
+        #cv2.waitKey(1)
+
+        #fps = 1 / (time.time() - start_time)
+        #fps_string = '\rFPS: {}'.format(round(fps, 1))
+        #sys.stdout.write(fps_string)
+
+        '''
         vis_util.visualize_boxes_and_labels_on_image_array(
             image_np,
             np.squeeze(boxes),
@@ -150,7 +251,8 @@ class Model:
             min_score_thresh=0.5,
             use_normalized_coordinates=True,
             line_thickness=4)
-        return image_np
+        '''
+        return image
 
 
     def show_np_images(self, images_np):

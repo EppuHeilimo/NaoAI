@@ -76,6 +76,7 @@ class WordRecModule(ALModule):
         """ Mandatory doc """
         nao.asr.pause(True)
         data = nao.memory.getData("WordRecognized")
+        print data
         nao.asr.pause(False)
 
     def stop(self):
@@ -296,7 +297,7 @@ if __name__ == '__main__':
         #AudioRemote = AudioRemoteModule("AudioRemote", nao)
         model.load_frozen_model()
         model.load_label_map()
-        nao.change_camera_parameters(vision_definitions.kQVGA, 9, 1)
+        nao.change_camera_parameters(vision_definitions.kVGA, 9, 1)
         nao.start_video()
         model.start_session()
         #AudioRemote.start()
